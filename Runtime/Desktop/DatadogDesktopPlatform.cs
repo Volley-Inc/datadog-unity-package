@@ -125,8 +125,7 @@ namespace Datadog.Unity.Desktop
 
         public IDdRumInternal InitRum(DatadogConfigurationOptions options)
         {
-            // RUM will be implemented in a later step
-            return new DdNoOpRum();
+            return new DatadogDesktopRum(this, options);
         }
 
         public void SendDebugTelemetry(string message)
