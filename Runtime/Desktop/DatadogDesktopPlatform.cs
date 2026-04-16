@@ -59,10 +59,14 @@ namespace Datadog.Unity.Desktop
 
             _httpClient = new HttpClient();
             _httpClient.DefaultRequestHeaders.Add("DD-API-KEY", options.ClientToken);
-            _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            _httpClient.DefaultRequestHeaders.Accept.Add(
+                new MediaTypeWithQualityHeaderValue("application/json")
+            );
 
             var environment = string.IsNullOrEmpty(options.Env) ? "prod" : options.Env;
-            Debug.Log($"[Datadog] Desktop platform initialized. Service: {options.ServiceName}, Env: {environment}, Site: {options.Site}");
+            Debug.Log(
+                $"[Datadog] Desktop platform initialized. Service: {options.ServiceName}, Env: {environment}, Site: {options.Site}"
+            );
         }
 
         public void SetVerbosity(CoreLoggerLevel logLevel)
@@ -75,7 +79,12 @@ namespace Datadog.Unity.Desktop
             _trackingConsent = trackingConsent;
         }
 
-        public void SetUserInfo(string id, string name, string email, Dictionary<string, object> extraInfo)
+        public void SetUserInfo(
+            string id,
+            string name,
+            string email,
+            Dictionary<string, object> extraInfo
+        )
         {
             _userId = id;
             _userName = name;
@@ -99,7 +108,8 @@ namespace Datadog.Unity.Desktop
                 options.RemoteLogThreshold,
                 options.RemoteSampleRate,
                 this,
-                options);
+                options
+            );
             return new DdWorkerProxyLogger(worker, innerLogger);
         }
 
@@ -125,7 +135,15 @@ namespace Datadog.Unity.Desktop
 
         public IDdRumInternal InitRum(DatadogConfigurationOptions options)
         {
-            return new DatadogDesktopRum(this, options);
+            var rum = new DatadogDesktopRum(this, options);
+
+            var trackerObject = new GameObject("DatadogDesktopLongTaskTracker");
+            trackerObject.hideFlags = HideFlags.HideAndDontSave;
+            UnityEngine.Object.DontDestroyOnLoad(trackerObject);
+            var tracker = trackerObject.AddComponent<DatadogDesktopLongTaskTracker>();
+            tracker.Init(rum);
+
+            return rum;
         }
 
         public void SendDebugTelemetry(string message)

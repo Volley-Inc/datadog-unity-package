@@ -37,15 +37,25 @@ namespace Datadog.Unity.Desktop
         private int _viewActionCount;
         private int _viewErrorCount;
         private int _viewResourceCount;
+        private double _refreshRateSum;
+        private double _refreshRateMin;
+        private int _refreshRateSampleCount;
 
-        public DatadogDesktopRum(DatadogDesktopPlatform platform, DatadogConfigurationOptions options)
+        public DatadogDesktopRum(
+            DatadogDesktopPlatform platform,
+            DatadogConfigurationOptions options
+        )
         {
             _platform = platform;
             _options = options;
             _sessionId = Guid.NewGuid().ToString();
         }
 
-        public void StartView(string key, string name = null, Dictionary<string, object> attributes = null)
+        public void StartView(
+            string key,
+            string name = null,
+            Dictionary<string, object> attributes = null
+        )
         {
             _viewId = Guid.NewGuid().ToString();
             _viewKey = key;
@@ -55,6 +65,9 @@ namespace Datadog.Unity.Desktop
             _viewActionCount = 0;
             _viewErrorCount = 0;
             _viewResourceCount = 0;
+            _refreshRateSum = 0;
+            _refreshRateMin = double.MaxValue;
+            _refreshRateSampleCount = 0;
 
             SendViewEvent(attributes);
         }
@@ -72,23 +85,41 @@ namespace Datadog.Unity.Desktop
 
         private void SendViewEvent(Dictionary<string, object> attributes)
         {
-            var timeSpentNs = (long)(DateTimeOffset.UtcNow - _viewStartTime).TotalMilliseconds * 1_000_000L;
+            var timeSpentNs =
+                (long)(DateTimeOffset.UtcNow - _viewStartTime).TotalMilliseconds * 1_000_000L;
             if (timeSpentNs < 0)
             {
                 timeSpentNs = 0;
             }
 
-            var rumEvent = CreateBaseEvent("view");
-            rumEvent["view"] = new Dictionary<string, object>
+            var viewData = new Dictionary<string, object>
             {
                 { "id", _viewId },
                 { "url", _viewKey },
                 { "name", _viewName },
                 { "time_spent", timeSpentNs },
-                { "action", new Dictionary<string, object> { { "count", _viewActionCount } } },
-                { "error", new Dictionary<string, object> { { "count", _viewErrorCount } } },
-                { "resource", new Dictionary<string, object> { { "count", _viewResourceCount } } },
+                {
+                    "action",
+                    new Dictionary<string, object> { { "count", _viewActionCount } }
+                },
+                {
+                    "error",
+                    new Dictionary<string, object> { { "count", _viewErrorCount } }
+                },
+                {
+                    "resource",
+                    new Dictionary<string, object> { { "count", _viewResourceCount } }
+                },
             };
+
+            if (_refreshRateSampleCount > 0)
+            {
+                viewData["refresh_rate_average"] = _refreshRateSum / _refreshRateSampleCount;
+                viewData["refresh_rate_min"] = _refreshRateMin;
+            }
+
+            var rumEvent = CreateBaseEvent("view");
+            rumEvent["view"] = viewData;
 
             // Override _dd with document_version required by view events
             rumEvent["_dd"] = new Dictionary<string, object>
@@ -101,7 +132,11 @@ namespace Datadog.Unity.Desktop
             SendRumEvent(rumEvent);
         }
 
-        public void AddAction(RumUserActionType type, string name, Dictionary<string, object> attributes = null)
+        public void AddAction(
+            RumUserActionType type,
+            string name,
+            Dictionary<string, object> attributes = null
+        )
         {
             if (_viewId == null)
             {
@@ -115,7 +150,10 @@ namespace Datadog.Unity.Desktop
             {
                 { "id", Guid.NewGuid().ToString() },
                 { "type", DatadogDesktopHelpers.RumActionTypeToString(type) },
-                { "target", new Dictionary<string, object> { { "name", name } } },
+                {
+                    "target",
+                    new Dictionary<string, object> { { "name", name } }
+                },
             };
 
             InjectViewContext(rumEvent);
@@ -123,19 +161,31 @@ namespace Datadog.Unity.Desktop
             SendRumEvent(rumEvent);
         }
 
-        public void StartAction(RumUserActionType type, string name, Dictionary<string, object> attributes = null)
+        public void StartAction(
+            RumUserActionType type,
+            string name,
+            Dictionary<string, object> attributes = null
+        )
         {
             // For simplicity, treat start/stop actions the same as discrete actions on desktop.
             // The native SDKs track duration internally; we emit the action on start.
             AddAction(type, name, attributes);
         }
 
-        public void StopAction(RumUserActionType type, string name, Dictionary<string, object> attributes = null)
+        public void StopAction(
+            RumUserActionType type,
+            string name,
+            Dictionary<string, object> attributes = null
+        )
         {
             // No-op — action was already emitted in StartAction.
         }
 
-        public void AddError(ErrorInfo error, RumErrorSource source, Dictionary<string, object> attributes = null)
+        public void AddError(
+            ErrorInfo error,
+            RumErrorSource source,
+            Dictionary<string, object> attributes = null
+        )
         {
             if (error == null || _viewId == null)
             {
@@ -168,7 +218,12 @@ namespace Datadog.Unity.Desktop
             SendRumEvent(rumEvent);
         }
 
-        public void StartResource(string key, RumHttpMethod httpMethod, string url, Dictionary<string, object> attributes = null)
+        public void StartResource(
+            string key,
+            RumHttpMethod httpMethod,
+            string url,
+            Dictionary<string, object> attributes = null
+        )
         {
             _pendingResources[key] = new PendingResource
             {
@@ -179,7 +234,13 @@ namespace Datadog.Unity.Desktop
             };
         }
 
-        public void StopResource(string key, RumResourceType kind, int? statusCode = null, long? size = null, Dictionary<string, object> attributes = null)
+        public void StopResource(
+            string key,
+            RumResourceType kind,
+            int? statusCode = null,
+            long? size = null,
+            Dictionary<string, object> attributes = null
+        )
         {
             if (_viewId == null || !_pendingResources.TryGetValue(key, out var pending))
             {
@@ -189,7 +250,8 @@ namespace Datadog.Unity.Desktop
             _pendingResources.Remove(key);
             _viewResourceCount++;
 
-            var durationNs = (long)(DateTimeOffset.UtcNow - pending.StartTime).TotalMilliseconds * 1_000_000L;
+            var durationNs =
+                (long)(DateTimeOffset.UtcNow - pending.StartTime).TotalMilliseconds * 1_000_000L;
             if (durationNs < 0)
             {
                 durationNs = 0;
@@ -222,18 +284,31 @@ namespace Datadog.Unity.Desktop
             SendRumEvent(rumEvent);
         }
 
-        public void StopResourceWithError(string key, string errorType, string errorMessage, Dictionary<string, object> attributes = null)
+        public void StopResourceWithError(
+            string key,
+            string errorType,
+            string errorMessage,
+            Dictionary<string, object> attributes = null
+        )
         {
             StopResourceWithError(key, new ErrorInfo(errorType, errorMessage), attributes);
         }
 
         [Obsolete]
-        public void StopResource(string key, Exception error, Dictionary<string, object> attributes = null)
+        public void StopResource(
+            string key,
+            Exception error,
+            Dictionary<string, object> attributes = null
+        )
         {
             StopResourceWithError(key, new ErrorInfo(error), attributes);
         }
 
-        public void StopResourceWithError(string key, ErrorInfo error, Dictionary<string, object> attributes = null)
+        public void StopResourceWithError(
+            string key,
+            ErrorInfo error,
+            Dictionary<string, object> attributes = null
+        )
         {
             if (_viewId == null)
             {
@@ -267,10 +342,15 @@ namespace Datadog.Unity.Desktop
             SendRumEvent(rumEvent);
         }
 
-        private static Dictionary<string, object> MergeDicts(Dictionary<string, object> a, Dictionary<string, object> b)
+        private static Dictionary<string, object> MergeDicts(
+            Dictionary<string, object> a,
+            Dictionary<string, object> b
+        )
         {
-            if (a == null) return b;
-            if (b == null) return a;
+            if (a == null)
+                return b;
+            if (b == null)
+                return a;
             var merged = new Dictionary<string, object>(a);
             foreach (var kvp in b)
             {
@@ -313,10 +393,7 @@ namespace Datadog.Unity.Desktop
                 { "url", _viewKey },
                 { "name", _viewName },
             };
-            rumEvent["feature_flags"] = new Dictionary<string, object>
-            {
-                { key, value },
-            };
+            rumEvent["feature_flags"] = new Dictionary<string, object> { { key, value } };
 
             SendRumEvent(rumEvent);
         }
@@ -331,7 +408,48 @@ namespace Datadog.Unity.Desktop
 
         public void UpdateExternalRefreshRate(double frameTimeSeconds)
         {
-            // Performance vitals will be implemented in a later step
+            if (_viewId == null || frameTimeSeconds <= 0)
+            {
+                return;
+            }
+
+            var fps = 1.0 / frameTimeSeconds;
+            _refreshRateSum += fps;
+            _refreshRateSampleCount++;
+
+            if (fps < _refreshRateMin)
+            {
+                _refreshRateMin = fps;
+            }
+        }
+
+        // Called from the main thread by DatadogDesktopLongTaskTracker. Dispatched to a background task so the
+        // synchronous HTTP send in SendRumEvent does not stall the frame.
+        internal void AddLongTask(long durationNs)
+        {
+            if (_viewId == null)
+            {
+                return;
+            }
+
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                if (_viewId == null)
+                {
+                    return;
+                }
+
+                var rumEvent = CreateBaseEvent("long_task");
+                rumEvent["long_task"] = new Dictionary<string, object>
+                {
+                    { "id", Guid.NewGuid().ToString() },
+                    { "duration", durationNs },
+                };
+
+                InjectViewContext(rumEvent);
+                MergeAttributes(rumEvent, null);
+                SendRumEvent(rumEvent);
+            });
         }
 
         private Dictionary<string, object> CreateBaseEvent(string type)
@@ -342,23 +460,20 @@ namespace Datadog.Unity.Desktop
                 { "date", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() },
                 { "source", "unity" },
                 {
-                    "application", new Dictionary<string, object>
-                    {
-                        { "id", _options.RumApplicationId },
-                    }
+                    "application",
+                    new Dictionary<string, object> { { "id", _options.RumApplicationId } }
                 },
                 {
-                    "session", new Dictionary<string, object>
+                    "session",
+                    new Dictionary<string, object>
                     {
                         { "id", _sessionId ?? EnsureSession() },
                         { "type", "user" },
                     }
                 },
                 {
-                    "_dd", new Dictionary<string, object>
-                    {
-                        { "format_version", 2 },
-                    }
+                    "_dd",
+                    new Dictionary<string, object> { { "format_version", 2 } }
                 },
                 { "service", _options.ServiceName ?? "unity" },
                 { "version", Application.version },
@@ -369,9 +484,12 @@ namespace Datadog.Unity.Desktop
 
             // Inject user info
             var usr = new Dictionary<string, object>();
-            if (_platform.UserId != null) usr["id"] = _platform.UserId;
-            if (_platform.UserName != null) usr["name"] = _platform.UserName;
-            if (_platform.UserEmail != null) usr["email"] = _platform.UserEmail;
+            if (_platform.UserId != null)
+                usr["id"] = _platform.UserId;
+            if (_platform.UserName != null)
+                usr["name"] = _platform.UserName;
+            if (_platform.UserEmail != null)
+                usr["email"] = _platform.UserEmail;
             foreach (var kvp in _platform.UserExtraInfo)
             {
                 usr[kvp.Key] = kvp.Value;
@@ -398,7 +516,10 @@ namespace Datadog.Unity.Desktop
             }
         }
 
-        private void MergeAttributes(Dictionary<string, object> rumEvent, Dictionary<string, object> eventAttributes)
+        private void MergeAttributes(
+            Dictionary<string, object> rumEvent,
+            Dictionary<string, object> eventAttributes
+        )
         {
             // Merge global RUM attributes
             if (_globalAttributes.Count > 0)
@@ -451,9 +572,15 @@ namespace Datadog.Unity.Desktop
             try
             {
                 var content = new StringContent(jsonPayload, Encoding.UTF8);
-                content.Headers.ContentType = new MediaTypeHeaderValue("text/plain") { CharSet = "UTF-8" };
+                content.Headers.ContentType = new MediaTypeHeaderValue("text/plain")
+                {
+                    CharSet = "UTF-8",
+                };
 
-                using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+                using var request = new HttpRequestMessage(HttpMethod.Post, url)
+                {
+                    Content = content,
+                };
                 request.Headers.Add("DD-EVP-ORIGIN", "unity");
                 request.Headers.Add("DD-EVP-ORIGIN-VERSION", DatadogSdk.SdkVersion);
                 request.Headers.Add("DD-REQUEST-ID", Guid.NewGuid().ToString());
@@ -466,7 +593,8 @@ namespace Datadog.Unity.Desktop
                 {
                     var body = response.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
                     UnityEngine.Debug.LogWarning(
-                        $"[Datadog] Failed to send RUM event: {(int)response.StatusCode} {response.StatusCode}. Body: {body}");
+                        $"[Datadog] Failed to send RUM event: {(int)response.StatusCode} {response.StatusCode}. Body: {body}"
+                    );
                 }
             }
             catch (Exception e)
