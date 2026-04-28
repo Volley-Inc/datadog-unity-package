@@ -20,6 +20,11 @@ namespace Datadog.Unity.Desktop
         private readonly Dictionary<string, object> _globalAttributes = new();
         private readonly Dictionary<string, PendingResource> _pendingResources = new();
 
+        // Guards _globalAttributes and view/session fields. All RUM API methods run on the worker
+        // thread except AddLongTask, which is invoked from the main thread and dispatches to the
+        // threadpool — without the lock that races with worker-thread mutations and iteration.
+        private readonly object _stateLock = new();
+
         private class PendingResource
         {
             public RumHttpMethod Method;
@@ -57,29 +62,36 @@ namespace Datadog.Unity.Desktop
             Dictionary<string, object> attributes = null
         )
         {
-            _viewId = Guid.NewGuid().ToString();
-            _viewKey = key;
-            _viewName = name ?? key;
-            _viewStartTime = DateTimeOffset.UtcNow;
-            _viewDocumentVersion = 1;
-            _viewActionCount = 0;
-            _viewErrorCount = 0;
-            _viewResourceCount = 0;
-            _refreshRateSum = 0;
-            _refreshRateMin = double.MaxValue;
-            _refreshRateSampleCount = 0;
+            lock (_stateLock)
+            {
+                _viewId = Guid.NewGuid().ToString();
+                _viewKey = key;
+                _viewName = name ?? key;
+                _viewStartTime = DateTimeOffset.UtcNow;
+                _viewDocumentVersion = 1;
+                _viewActionCount = 0;
+                _viewErrorCount = 0;
+                _viewResourceCount = 0;
+                _refreshRateSum = 0;
+                _refreshRateMin = double.MaxValue;
+                _refreshRateSampleCount = 0;
+            }
 
             SendViewEvent(attributes);
         }
 
         public void StopView(string key, Dictionary<string, object> attributes = null)
         {
-            if (_viewId == null)
+            lock (_stateLock)
             {
-                return;
+                if (_viewId == null)
+                {
+                    return;
+                }
+
+                _viewDocumentVersion++;
             }
 
-            _viewDocumentVersion++;
             SendViewEvent(attributes);
         }
 
@@ -366,7 +378,10 @@ namespace Datadog.Unity.Desktop
                 return;
             }
 
-            _globalAttributes[key] = value;
+            lock (_stateLock)
+            {
+                _globalAttributes[key] = value;
+            }
         }
 
         public void RemoveAttribute(string key)
@@ -376,7 +391,10 @@ namespace Datadog.Unity.Desktop
                 return;
             }
 
-            _globalAttributes.Remove(key);
+            lock (_stateLock)
+            {
+                _globalAttributes.Remove(key);
+            }
         }
 
         public void AddFeatureFlagEvaluation(string key, object value)
@@ -400,46 +418,55 @@ namespace Datadog.Unity.Desktop
 
         public void StopSession()
         {
-            _sessionId = null;
-            _viewId = null;
-            _viewKey = null;
-            _viewName = null;
+            lock (_stateLock)
+            {
+                _sessionId = null;
+                _viewId = null;
+                _viewKey = null;
+                _viewName = null;
+            }
         }
 
         public void UpdateExternalRefreshRate(double frameTimeSeconds)
         {
-            if (_viewId == null || frameTimeSeconds <= 0)
+            if (frameTimeSeconds <= 0)
             {
                 return;
             }
 
             var fps = 1.0 / frameTimeSeconds;
-            _refreshRateSum += fps;
-            _refreshRateSampleCount++;
 
-            if (fps < _refreshRateMin)
-            {
-                _refreshRateMin = fps;
-            }
-        }
-
-        // Called from the main thread by DatadogDesktopLongTaskTracker. Dispatched to a background task so the
-        // synchronous HTTP send in SendRumEvent does not stall the frame.
-        internal void AddLongTask(long durationNs)
-        {
-            if (_viewId == null)
-            {
-                return;
-            }
-
-            System.Threading.Tasks.Task.Run(() =>
+            lock (_stateLock)
             {
                 if (_viewId == null)
                 {
                     return;
                 }
 
-                var rumEvent = CreateBaseEvent("long_task");
+                _refreshRateSum += fps;
+                _refreshRateSampleCount++;
+
+                if (fps < _refreshRateMin)
+                {
+                    _refreshRateMin = fps;
+                }
+            }
+        }
+
+        // Called from the main thread by DatadogDesktopLongTaskTracker. The event payload is built under
+        // _stateLock so reads of view/session/global-attribute state cannot tear against worker-thread
+        // mutations; the synchronous HTTP send is dispatched outside the lock so it does not stall the frame.
+        internal void AddLongTask(long durationNs)
+        {
+            Dictionary<string, object> rumEvent;
+            lock (_stateLock)
+            {
+                if (_viewId == null)
+                {
+                    return;
+                }
+
+                rumEvent = CreateBaseEvent("long_task");
                 rumEvent["long_task"] = new Dictionary<string, object>
                 {
                     { "id", Guid.NewGuid().ToString() },
@@ -448,8 +475,9 @@ namespace Datadog.Unity.Desktop
 
                 InjectViewContext(rumEvent);
                 MergeAttributes(rumEvent, null);
-                SendRumEvent(rumEvent);
-            });
+            }
+
+            System.Threading.Tasks.Task.Run(() => SendRumEvent(rumEvent));
         }
 
         private Dictionary<string, object> CreateBaseEvent(string type)
@@ -483,14 +511,15 @@ namespace Datadog.Unity.Desktop
             rumEvent["env"] = env;
 
             // Inject user info
+            var user = _platform.SnapshotUserInfo();
             var usr = new Dictionary<string, object>();
-            if (_platform.UserId != null)
-                usr["id"] = _platform.UserId;
-            if (_platform.UserName != null)
-                usr["name"] = _platform.UserName;
-            if (_platform.UserEmail != null)
-                usr["email"] = _platform.UserEmail;
-            foreach (var kvp in _platform.UserExtraInfo)
+            if (user.Id != null)
+                usr["id"] = user.Id;
+            if (user.Name != null)
+                usr["name"] = user.Name;
+            if (user.Email != null)
+                usr["email"] = user.Email;
+            foreach (var kvp in user.ExtraInfo)
             {
                 usr[kvp.Key] = kvp.Value;
             }
@@ -521,24 +550,27 @@ namespace Datadog.Unity.Desktop
             Dictionary<string, object> eventAttributes
         )
         {
-            // Merge global RUM attributes
-            if (_globalAttributes.Count > 0)
+            // Snapshot global RUM attributes under the lock so iteration cannot race with
+            // AddAttribute/RemoveAttribute on a different thread.
+            Dictionary<string, object> globalSnapshot;
+            lock (_stateLock)
             {
-                var context = new Dictionary<string, object>();
-                foreach (var kvp in _globalAttributes)
-                {
-                    context[kvp.Key] = kvp.Value;
-                }
+                globalSnapshot = _globalAttributes.Count > 0
+                    ? new Dictionary<string, object>(_globalAttributes)
+                    : null;
+            }
 
+            if (globalSnapshot != null)
+            {
                 if (eventAttributes != null)
                 {
                     foreach (var kvp in eventAttributes)
                     {
-                        context[kvp.Key] = kvp.Value;
+                        globalSnapshot[kvp.Key] = kvp.Value;
                     }
                 }
 
-                rumEvent["context"] = context;
+                rumEvent["context"] = globalSnapshot;
             }
             else if (eventAttributes != null && eventAttributes.Count > 0)
             {
@@ -548,8 +580,11 @@ namespace Datadog.Unity.Desktop
 
         private string EnsureSession()
         {
-            _sessionId = Guid.NewGuid().ToString();
-            return _sessionId;
+            lock (_stateLock)
+            {
+                _sessionId = Guid.NewGuid().ToString();
+                return _sessionId;
+            }
         }
 
         private void SendRumEvent(Dictionary<string, object> rumEvent)

@@ -92,7 +92,7 @@ namespace Datadog.Unity.Desktop
             }
 
             // Merge global attributes, then per-logger attributes, then per-call attributes
-            foreach (var kvp in _platform.GlobalLogAttributes)
+            foreach (var kvp in _platform.SnapshotGlobalLogAttributes())
             {
                 logEntry[kvp.Key] = kvp.Value;
             }
@@ -111,22 +111,23 @@ namespace Datadog.Unity.Desktop
             }
 
             // Add user info if set
-            if (_platform.UserId != null)
+            var user = _platform.SnapshotUserInfo();
+            if (user.Id != null)
             {
-                logEntry["usr.id"] = _platform.UserId;
+                logEntry["usr.id"] = user.Id;
             }
 
-            if (_platform.UserName != null)
+            if (user.Name != null)
             {
-                logEntry["usr.name"] = _platform.UserName;
+                logEntry["usr.name"] = user.Name;
             }
 
-            if (_platform.UserEmail != null)
+            if (user.Email != null)
             {
-                logEntry["usr.email"] = _platform.UserEmail;
+                logEntry["usr.email"] = user.Email;
             }
 
-            foreach (var kvp in _platform.UserExtraInfo)
+            foreach (var kvp in user.ExtraInfo)
             {
                 logEntry[$"usr.{kvp.Key}"] = kvp.Value;
             }

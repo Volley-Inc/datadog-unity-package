@@ -41,11 +41,24 @@ namespace Datadog.Unity.Desktop
         private TrackingConsent _trackingConsent = TrackingConsent.Pending;
         private HttpClient _httpClient;
 
+        // Guards user info fields (_userId/_userName/_userEmail/_userExtraInfo) and _globalLogAttributes.
+        // ClearAllData runs on the main thread while the worker thread iterates these collections;
+        // without the lock that races with InvalidOperationException on the worker.
+        private readonly object _stateLock = new();
+
         private string _userId;
         private string _userName;
         private string _userEmail;
         private Dictionary<string, object> _userExtraInfo = new();
         private Dictionary<string, object> _globalLogAttributes = new();
+
+        internal struct UserInfoSnapshot
+        {
+            public string Id;
+            public string Name;
+            public string Email;
+            public Dictionary<string, object> ExtraInfo;
+        }
 
         public DatadogWorker CreateWorker(IInternalLogger logger)
         {
@@ -86,10 +99,15 @@ namespace Datadog.Unity.Desktop
             Dictionary<string, object> extraInfo
         )
         {
-            _userId = id;
-            _userName = name;
-            _userEmail = email;
-            _userExtraInfo = extraInfo ?? new Dictionary<string, object>();
+            lock (_stateLock)
+            {
+                _userId = id;
+                _userName = name;
+                _userEmail = email;
+                _userExtraInfo = extraInfo != null
+                    ? new Dictionary<string, object>(extraInfo)
+                    : new Dictionary<string, object>();
+            }
         }
 
         public void AddUserExtraInfo(Dictionary<string, object> extraInfo)
@@ -99,7 +117,10 @@ namespace Datadog.Unity.Desktop
                 return;
             }
 
-            _userExtraInfo.Copy(extraInfo);
+            lock (_stateLock)
+            {
+                _userExtraInfo.Copy(extraInfo);
+            }
         }
 
         public DdLogger CreateLogger(DatadogLoggingOptions options, DatadogWorker worker)
@@ -120,7 +141,10 @@ namespace Datadog.Unity.Desktop
                 return;
             }
 
-            _globalLogAttributes.Copy(attributes);
+            lock (_stateLock)
+            {
+                _globalLogAttributes.Copy(attributes);
+            }
         }
 
         public void RemoveLogsAttribute(string key)
@@ -130,7 +154,10 @@ namespace Datadog.Unity.Desktop
                 return;
             }
 
-            _globalLogAttributes.Remove(key);
+            lock (_stateLock)
+            {
+                _globalLogAttributes.Remove(key);
+            }
         }
 
         public IDdRumInternal InitRum(DatadogConfigurationOptions options)
@@ -161,11 +188,14 @@ namespace Datadog.Unity.Desktop
 
         public void ClearAllData()
         {
-            _globalLogAttributes.Clear();
-            _userExtraInfo.Clear();
-            _userId = null;
-            _userName = null;
-            _userEmail = null;
+            lock (_stateLock)
+            {
+                _globalLogAttributes.Clear();
+                _userExtraInfo.Clear();
+                _userId = null;
+                _userName = null;
+                _userEmail = null;
+            }
         }
 
         public string GetNativeStack(Exception error)
@@ -179,14 +209,26 @@ namespace Datadog.Unity.Desktop
 
         internal TrackingConsent TrackingConsent => _trackingConsent;
 
-        internal string UserId => _userId;
+        internal UserInfoSnapshot SnapshotUserInfo()
+        {
+            lock (_stateLock)
+            {
+                return new UserInfoSnapshot
+                {
+                    Id = _userId,
+                    Name = _userName,
+                    Email = _userEmail,
+                    ExtraInfo = new Dictionary<string, object>(_userExtraInfo),
+                };
+            }
+        }
 
-        internal string UserName => _userName;
-
-        internal string UserEmail => _userEmail;
-
-        internal Dictionary<string, object> UserExtraInfo => _userExtraInfo;
-
-        internal Dictionary<string, object> GlobalLogAttributes => _globalLogAttributes;
+        internal Dictionary<string, object> SnapshotGlobalLogAttributes()
+        {
+            lock (_stateLock)
+            {
+                return new Dictionary<string, object>(_globalLogAttributes);
+            }
+        }
     }
 }
