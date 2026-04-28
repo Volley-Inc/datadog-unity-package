@@ -135,7 +135,7 @@ namespace Datadog.Unity.Desktop
                 viewData["refresh_rate_min"] = _refreshRateMin;
             }
 
-            var rumEvent = CreateBaseEvent("view");
+            var rumEvent = CreateBaseEvent("view", ExtractTimestampMs(attributes));
             rumEvent["view"] = viewData;
 
             // Override _dd with document_version required by view events
@@ -180,7 +180,7 @@ namespace Datadog.Unity.Desktop
 
             _viewActionCount++;
 
-            var rumEvent = CreateBaseEvent("action");
+            var rumEvent = CreateBaseEvent("action", ExtractTimestampMs(attributes));
             rumEvent["action"] = new Dictionary<string, object>
             {
                 { "id", Guid.NewGuid().ToString() },
@@ -245,7 +245,7 @@ namespace Datadog.Unity.Desktop
                 errorData["stack"] = error.StackTrace;
             }
 
-            var rumEvent = CreateBaseEvent("error");
+            var rumEvent = CreateBaseEvent("error", ExtractTimestampMs(attributes));
             rumEvent["error"] = errorData;
 
             InjectViewContext(rumEvent);
@@ -319,7 +319,12 @@ namespace Datadog.Unity.Desktop
                 resourceData["size"] = size.Value;
             }
 
-            var rumEvent = CreateBaseEvent("resource");
+            // Prefer the stop-time timestamp; fall back to the start-time timestamp captured
+            // when the resource was opened. Pull both out before merging so neither leaks into
+            // the event `context`.
+            var stopTimestampMs = ExtractTimestampMs(attributes);
+            var startTimestampMs = ExtractTimestampMs(pending.Attributes);
+            var rumEvent = CreateBaseEvent("resource", stopTimestampMs ?? startTimestampMs);
             rumEvent["resource"] = resourceData;
 
             InjectViewContext(rumEvent);
@@ -385,7 +390,7 @@ namespace Datadog.Unity.Desktop
                 errorData["stack"] = error.StackTrace;
             }
 
-            var rumEvent = CreateBaseEvent("error");
+            var rumEvent = CreateBaseEvent("error", ExtractTimestampMs(attributes));
             rumEvent["error"] = errorData;
 
             InjectViewContext(rumEvent);
@@ -523,12 +528,37 @@ namespace Datadog.Unity.Desktop
             System.Threading.Tasks.Task.Run(() => SendRumEvent(rumEvent));
         }
 
-        private Dictionary<string, object> CreateBaseEvent(string type)
+        // Pulls the capture-time timestamp injected by DdRumProcessor.InjectTime out of the
+        // event attributes so it doesn't end up in `context` and so callers can stamp the event
+        // `date` field with the original capture time rather than the worker-thread send time
+        // (which can drift when SendRumEvent blocks on HTTP).
+        private static long? ExtractTimestampMs(Dictionary<string, object> attributes)
+        {
+            if (attributes == null)
+            {
+                return null;
+            }
+
+            if (!attributes.TryGetValue(DdRumProcessor.DdRumTimestampAttribute, out var raw))
+            {
+                return null;
+            }
+
+            attributes.Remove(DdRumProcessor.DdRumTimestampAttribute);
+            return raw switch
+            {
+                long l => l,
+                int i => i,
+                _ => null,
+            };
+        }
+
+        private Dictionary<string, object> CreateBaseEvent(string type, long? timestampMs = null)
         {
             var rumEvent = new Dictionary<string, object>
             {
                 { "type", type },
-                { "date", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() },
+                { "date", timestampMs ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() },
                 { "source", "unity" },
                 {
                     "application",
