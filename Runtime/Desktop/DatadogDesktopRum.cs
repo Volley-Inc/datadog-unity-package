@@ -277,14 +277,16 @@ namespace Datadog.Unity.Desktop
             Dictionary<string, object> attributes = null
         )
         {
-            if (_viewId == null || !_pendingResources.TryGetValue(key, out var pending))
+            if (!_pendingResources.TryGetValue(key, out var pending))
             {
                 return;
             }
 
+            // Always release the pending entry, even if the view was stopped or consent was
+            // revoked between Start and Stop, to keep the dictionary from growing unboundedly.
             _pendingResources.Remove(key);
 
-            if (_platform.TrackingConsent != TrackingConsent.Granted)
+            if (_viewId == null || _platform.TrackingConsent != TrackingConsent.Granted)
             {
                 return;
             }
@@ -351,14 +353,16 @@ namespace Datadog.Unity.Desktop
             Dictionary<string, object> attributes = null
         )
         {
-            if (error == null || _viewId == null)
+            if (error == null)
             {
                 return;
             }
 
+            // Always release the pending entry, even if the view was stopped or consent was
+            // revoked between Start and Stop, to keep the dictionary from growing unboundedly.
             _pendingResources.Remove(key);
 
-            if (_platform.TrackingConsent != TrackingConsent.Granted)
+            if (_viewId == null || _platform.TrackingConsent != TrackingConsent.Granted)
             {
                 return;
             }
