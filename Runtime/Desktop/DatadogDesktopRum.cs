@@ -173,7 +173,7 @@ namespace Datadog.Unity.Desktop
             Dictionary<string, object> attributes = null
         )
         {
-            if (_viewId == null)
+            if (_viewId == null || _platform.TrackingConsent != TrackingConsent.Granted)
             {
                 return;
             }
@@ -222,7 +222,7 @@ namespace Datadog.Unity.Desktop
             Dictionary<string, object> attributes = null
         )
         {
-            if (error == null || _viewId == null)
+            if (error == null || _viewId == null || _platform.TrackingConsent != TrackingConsent.Granted)
             {
                 return;
             }
@@ -283,6 +283,12 @@ namespace Datadog.Unity.Desktop
             }
 
             _pendingResources.Remove(key);
+
+            if (_platform.TrackingConsent != TrackingConsent.Granted)
+            {
+                return;
+            }
+
             _viewResourceCount++;
 
             var durationNs =
@@ -351,6 +357,12 @@ namespace Datadog.Unity.Desktop
             }
 
             _pendingResources.Remove(key);
+
+            if (_platform.TrackingConsent != TrackingConsent.Granted)
+            {
+                return;
+            }
+
             _viewErrorCount++;
 
             var errorData = new Dictionary<string, object>
