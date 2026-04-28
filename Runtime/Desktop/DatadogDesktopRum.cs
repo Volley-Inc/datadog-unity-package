@@ -345,7 +345,7 @@ namespace Datadog.Unity.Desktop
             Dictionary<string, object> attributes = null
         )
         {
-            if (_viewId == null)
+            if (error == null || _viewId == null)
             {
                 return;
             }
