@@ -103,7 +103,7 @@ namespace Datadog.Unity.Desktop
         )
         {
             var timeSpentNs =
-                (long)(DateTimeOffset.UtcNow - _viewStartTime).TotalMilliseconds * 1_000_000L;
+                (long)((DateTimeOffset.UtcNow - _viewStartTime).TotalMilliseconds * 1_000_000.0);
             if (timeSpentNs < 0)
             {
                 timeSpentNs = 0;
@@ -286,7 +286,7 @@ namespace Datadog.Unity.Desktop
             _viewResourceCount++;
 
             var durationNs =
-                (long)(DateTimeOffset.UtcNow - pending.StartTime).TotalMilliseconds * 1_000_000L;
+                (long)((DateTimeOffset.UtcNow - pending.StartTime).TotalMilliseconds * 1_000_000.0);
             if (durationNs < 0)
             {
                 durationNs = 0;
