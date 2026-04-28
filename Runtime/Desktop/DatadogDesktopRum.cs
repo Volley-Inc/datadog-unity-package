@@ -649,7 +649,7 @@ namespace Datadog.Unity.Desktop
 
                 // DD-API-KEY is already set globally on the shared HttpClient.
 
-                var response = _platform.HttpClient.SendAsync(request).GetAwaiter().GetResult();
+                using var response = _platform.HttpClient.SendAsync(request).GetAwaiter().GetResult();
 
                 if (!response.IsSuccessStatusCode)
                 {

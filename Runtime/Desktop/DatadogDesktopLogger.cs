@@ -175,7 +175,7 @@ namespace Datadog.Unity.Desktop
                 // from the worker thread, and UnityWebRequest requires the main thread.
                 // The DD-API-KEY header is already set on the shared HttpClient instance.
                 var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
-                var response = _platform.HttpClient.PostAsync(url, content).GetAwaiter().GetResult();
+                using var response = _platform.HttpClient.PostAsync(url, content).GetAwaiter().GetResult();
 
                 if (!response.IsSuccessStatusCode)
                 {
