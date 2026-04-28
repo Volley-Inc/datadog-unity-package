@@ -19,6 +19,7 @@ namespace Datadog.Unity.Desktop
         private readonly DatadogConfigurationOptions _options;
         private readonly Dictionary<string, object> _globalAttributes = new();
         private readonly Dictionary<string, PendingResource> _pendingResources = new();
+        private readonly Dictionary<string, object> _featureFlags = new();
 
         // Guards _globalAttributes and view/session fields. All RUM API methods run on the worker
         // thread except AddLongTask, which is invoked from the main thread and dispatches to the
@@ -75,6 +76,7 @@ namespace Datadog.Unity.Desktop
                 _refreshRateSum = 0;
                 _refreshRateMin = double.MaxValue;
                 _refreshRateSampleCount = 0;
+                _featureFlags.Clear();
             }
 
             SendViewEvent(attributes);
@@ -95,7 +97,10 @@ namespace Datadog.Unity.Desktop
             SendViewEvent(attributes);
         }
 
-        private void SendViewEvent(Dictionary<string, object> attributes)
+        private void SendViewEvent(
+            Dictionary<string, object> attributes,
+            Dictionary<string, object> featureFlags = null
+        )
         {
             var timeSpentNs =
                 (long)(DateTimeOffset.UtcNow - _viewStartTime).TotalMilliseconds * 1_000_000L;
@@ -139,6 +144,24 @@ namespace Datadog.Unity.Desktop
                 { "format_version", 2 },
                 { "document_version", _viewDocumentVersion },
             };
+
+            // Caller may pass an explicit snapshot (e.g. AddFeatureFlagEvaluation captured it
+            // atomically with the document_version bump); otherwise read the current set.
+            if (featureFlags == null)
+            {
+                lock (_stateLock)
+                {
+                    if (_featureFlags.Count > 0)
+                    {
+                        featureFlags = new Dictionary<string, object>(_featureFlags);
+                    }
+                }
+            }
+
+            if (featureFlags != null && featureFlags.Count > 0)
+            {
+                rumEvent["feature_flags"] = featureFlags;
+            }
 
             MergeAttributes(rumEvent, attributes);
             SendRumEvent(rumEvent);
@@ -399,21 +422,25 @@ namespace Datadog.Unity.Desktop
 
         public void AddFeatureFlagEvaluation(string key, object value)
         {
-            if (_viewId == null)
+            if (key == null)
             {
                 return;
             }
 
-            var rumEvent = CreateBaseEvent("view");
-            rumEvent["view"] = new Dictionary<string, object>
+            Dictionary<string, object> featureFlagsSnapshot;
+            lock (_stateLock)
             {
-                { "id", _viewId },
-                { "url", _viewKey },
-                { "name", _viewName },
-            };
-            rumEvent["feature_flags"] = new Dictionary<string, object> { { key, value } };
+                if (_viewId == null)
+                {
+                    return;
+                }
 
-            SendRumEvent(rumEvent);
+                _featureFlags[key] = value;
+                _viewDocumentVersion++;
+                featureFlagsSnapshot = new Dictionary<string, object>(_featureFlags);
+            }
+
+            SendViewEvent(attributes: null, featureFlags: featureFlagsSnapshot);
         }
 
         public void StopSession()
