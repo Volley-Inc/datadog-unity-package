@@ -40,25 +40,7 @@ namespace Datadog.Unity.Flags
         /// </summary>
         public static string GetIntakeEndpoint(DatadogSite site)
         {
-            switch (site)
-            {
-                case DatadogSite.Us1:
-                    return "https://browser-intake-datadoghq.com";
-                case DatadogSite.Us3:
-                    return "https://browser-intake-us3-datadoghq.com";
-                case DatadogSite.Us5:
-                    return "https://browser-intake-us5-datadoghq.com";
-                case DatadogSite.Eu1:
-                    return "https://browser-intake-datadoghq.eu";
-                case DatadogSite.Ap1:
-                    return "https://browser-intake-ap1-datadoghq.com";
-                case DatadogSite.Ap2:
-                    return "https://browser-intake-ap2-datadoghq.com";
-                case DatadogSite.Us1Fed:
-                    return "https://browser-intake-ddog-gov.com";
-                default:
-                    return "https://browser-intake-datadoghq.com";
-            }
+            return DatadogIntakeEndpoints.GetBrowserIntakeEndpoint(site);
         }
 
         /// <summary>

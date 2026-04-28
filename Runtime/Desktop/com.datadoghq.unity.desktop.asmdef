@@ -1,0 +1,21 @@
+{
+    "name": "com.datadoghq.unity.desktop",
+    "rootNamespace": "Datadog.Unity.Desktop",
+    "references": [
+        "com.datadog.unity"
+    ],
+    "includePlatforms": [
+        "WindowsStandalone32",
+        "WindowsStandalone64",
+        "macOSStandalone",
+        "LinuxStandalone64"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

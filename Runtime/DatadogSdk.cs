@@ -111,6 +111,27 @@ namespace Datadog.Unity
         }
 
         /// <summary>
+        /// Updates the env tag applied to subsequent RUM events. This only takes effect on platforms whose RUM
+        /// implementation reads env per-event from the shared <see cref="DatadogConfigurationOptions"/> (currently
+        /// Desktop). On iOS, Android, and WebGL the env is baked into the native SDK at initialization and cannot
+        /// be changed at runtime.
+        /// </summary>
+        /// <param name="env">The env tag (e.g. "production", "staging", "dev").</param>
+        public void SetEnv(string env)
+        {
+            if (string.IsNullOrWhiteSpace(env))
+            {
+                return;
+            }
+
+            var options = DatadogConfigurationOptions.Load();
+            if (options != null)
+            {
+                options.Env = env;
+            }
+        }
+
+        /// <summary>
         /// Sets information about the current user. User information will be added to logs, traces, and RUM events
         /// automatically.
         /// </summary>
