@@ -70,7 +70,9 @@ namespace Datadog.Unity.Desktop
             _options = options;
             SetVerbosity(options.SdkVerbosity);
 
-            _httpClient = new HttpClient();
+            // Bound the request time so a slow/unreachable intake cannot stall the worker thread,
+            // which serializes log + RUM sends, for the default 100s.
+            _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             _httpClient.DefaultRequestHeaders.Add("DD-API-KEY", options.ClientToken);
             _httpClient.DefaultRequestHeaders.Accept.Add(
                 new MediaTypeWithQualityHeaderValue("application/json")
